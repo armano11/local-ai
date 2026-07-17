@@ -7,11 +7,15 @@ export default defineConfig({
   // Relative base so the built app works on GitHub Pages (served from a subpath)
   // as well as on Vercel (served from root).
   base: './',
+  // The RunAnywhere packages locate their WASM binaries at runtime via
+  // `new URL('../../wasm/racommons.js', import.meta.url)`. Vite's dependency
+  // pre-bundling rewrites `import.meta.url` to point inside `.vite/deps/`,
+  // which breaks that relative lookup and makes SDK init fail (blank page).
+  // Excluding them keeps `import.meta.url` pointed at the real package dir.
   optimizeDeps: {
-    // The RunAnywhere packages ship WASM + workers; pre-bundling them keeps
-    // dev-server startup fast and avoids duplicate module instances.
-    include: ['@runanywhere/web', '@runanywhere/web-llamacpp'],
+    exclude: ['@runanywhere/web', '@runanywhere/web-llamacpp'],
   },
+  assetsInclude: ['**/*.wasm'],
   server: {
     // llama.cpp WASM uses SharedArrayBuffer for multi-threaded inference.
     // SharedArrayBuffer is only available in a cross-origin isolated context,
