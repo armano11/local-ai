@@ -6,15 +6,21 @@ import react from '@vitejs/plugin-react'
 
 const rootDir = dirname(fileURLToPath(import.meta.url))
 
-// The RunAnywhere WASM glue files (racommons*.js) load their `.wasm` binary at
-// runtime by BARE, un-hashed filename relative to their own URL — e.g. the glue
-// bundled to `dist/assets/racommons-<hash>.js` fetches `/assets/racommons.wasm`.
-// Rollup bundles the glue JS but never emits those `.wasm` files, so production
-// 404s ("both async and sync fetching of the wasm failed"). This plugin copies
-// each `.wasm` into `dist/assets/` under its original name so the glue finds it.
-const RUNANYWHERE_WASM = [
+// The RunAnywhere emscripten glue files reference their siblings at runtime by
+// BARE, un-hashed filename relative to their own URL:
+//   • the `.wasm` binary   → `locateFile("racommons.wasm")`
+//   • the pthread worker   → `new Worker(new URL("racommons.js", import.meta.url))`
+// Rollup bundles/renames the glue (e.g. `racommons-<hash>.js`) but never emits
+// the un-hashed `racommons.js` / `racommons.wasm` siblings, so production 404s
+// (WASM: "both async and sync fetching failed"; worker: an `error` event).
+// This plugin copies both the `.js` glue and the `.wasm` binary into
+// `dist/assets/` under their ORIGINAL names so those bare lookups resolve.
+const RUNANYWHERE_ARTIFACTS = [
+  'node_modules/@runanywhere/web/wasm/racommons.js',
   'node_modules/@runanywhere/web/wasm/racommons.wasm',
+  'node_modules/@runanywhere/web-llamacpp/wasm/racommons-llamacpp.js',
   'node_modules/@runanywhere/web-llamacpp/wasm/racommons-llamacpp.wasm',
+  'node_modules/@runanywhere/web-llamacpp/wasm/racommons-llamacpp-webgpu.js',
   'node_modules/@runanywhere/web-llamacpp/wasm/racommons-llamacpp-webgpu.wasm',
 ]
 
@@ -25,7 +31,7 @@ function copyRunAnywhereWasm(): Plugin {
     writeBundle(options) {
       const assetsDir = resolve(options.dir ?? resolve(rootDir, 'dist'), 'assets')
       mkdirSync(assetsDir, { recursive: true })
-      for (const rel of RUNANYWHERE_WASM) {
+      for (const rel of RUNANYWHERE_ARTIFACTS) {
         const src = resolve(rootDir, rel)
         const name = rel.slice(rel.lastIndexOf('/') + 1)
         copyFileSync(src, resolve(assetsDir, name))
