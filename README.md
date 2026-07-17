@@ -1,29 +1,67 @@
-# Local AI Chat — Running an LLM Entirely in Your Browser
+<div align="center">
 
-> A chat app where the AI lives on your machine. No cloud, no API keys, no server — the model downloads once and runs on your GPU via WebAssembly. Type a message, and every token is generated locally.
+# 🧠 Local AI Chat
 
-## 🔗 Live Demo
+### An LLM that lives in your browser tab — no cloud, no API keys, no server.
 
-**[https://your-project.vercel.app](https://your-project.vercel.app)** _(replace with your Vercel URL after deploying — see [Deploying](#deploying))_
+The model downloads **once**, then runs on your GPU through WebAssembly.
+Type a message, and every single token is generated **on your machine**.
 
-> Open it in **Chrome or Edge**, click **Load Model**, wait for the ~250MB download once, then chat. After that first download, it works even with your Wi-Fi turned off.
+<br />
+
+[![React](https://img.shields.io/badge/React-18-149ECA?logo=react&logoColor=white)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![RunAnywhere](https://img.shields.io/badge/RunAnywhere-Web%20SDK%200.20-000000)](https://docs.runanywhere.ai)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](#-license)
+
+<br />
+
+**[🚀 Live Demo](https://your-project.vercel.app)** &nbsp;·&nbsp; **[⚡ Quick Start](#-quick-start)** &nbsp;·&nbsp; **[🔬 How It Works](#-how-it-works)** &nbsp;·&nbsp; **[☁️ Deploy](#-deploying)**
+
+</div>
+
+<br />
+
+> [!TIP]
+> Open the demo in **Chrome or Edge**, click **Load Model**, wait for the one-time ~250 MB download, then chat. After that first download, it keeps working **even with your Wi-Fi turned off.**
 
 ---
 
-## What This Demonstrates
+## ✨ What This Demonstrates
 
-- **100% on-device inference** — the LLM runs inside your browser tab through llama.cpp compiled to WebAssembly. The prompt, the model, and every generated token stay on your device.
-- **Zero cloud dependency** — there's no backend, no inference API, and nothing to bill. After the model file is cached, the app makes **no network calls at all**.
-- **Privacy by default** — because nothing is sent anywhere, this is a viable pattern for sensitive text (medical notes, legal drafts, internal docs) that can't leave a machine.
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### 🔒 100% On-Device
+The LLM runs inside your browser tab via **llama.cpp compiled to WebAssembly**. The prompt, the weights, and every generated token stay on your device.
+
+</td>
+<td width="33%" valign="top">
+
+### ☁️ Zero Cloud
+No backend. No inference API. Nothing to bill. Once the model is cached, the app makes **no network calls at all**.
+
+</td>
+<td width="33%" valign="top">
+
+### 🕵️ Private by Default
+Because nothing leaves the machine, this is a viable pattern for **sensitive text** — medical notes, legal drafts, internal docs.
+
+</td>
+</tr>
+</table>
 
 ---
 
-## Quick Start (3 steps)
+## ⚡ Quick Start
 
 ```bash
 # 1. Clone
-git clone https://github.com/<your-username>/local-ai-chat.git
-cd local-ai-chat
+git clone https://github.com/armano11/local-ai.git
+cd local-ai
 
 # 2. Install
 npm install
@@ -32,19 +70,35 @@ npm install
 npm run dev
 ```
 
-Then open **http://localhost:5173** and click **Load Model**.
+Then open **[http://localhost:5173](http://localhost:5173)** and click **Load Model**.
 
-> **Use Chrome or Edge.** These browsers ship WebGPU, which the SDK uses to run inference on your GPU. Other browsers still work, but they fall back to CPU (noticeably slower). The app detects this and shows a warning.
+> [!IMPORTANT]
+> **Use Chrome or Edge.** These browsers ship WebGPU, which the SDK uses to run inference on your GPU. Other browsers still work but fall back to CPU (noticeably slower). The app detects this and shows a warning.
 
 ---
 
-## How It Works
+## 📑 Table of Contents
 
-The entire app is two files: `src/lib/runanywhere.ts` (SDK setup) and `src/App.tsx` (all the UI and chat logic). Here's what each piece of the SDK is doing.
+- [How It Works](#-how-it-works)
+  - [1. SDK Initialization](#1-sdk-initialization)
+  - [2. Model Loading &amp; Download Progress](#2-model-loading--download-progress)
+  - [3. Text Generation](#3-text-generation)
+  - [4. Under the Hood](#4-under-the-hood)
+- [Project Structure](#-project-structure)
+- [Tech Stack](#-tech-stack)
+- [Deploying](#-deploying)
+- [About RunAnywhere](#-about-runanywhere)
+- [License](#-license)
+
+---
+
+## 🔬 How It Works
+
+The entire app is **two files**: `src/lib/runanywhere.ts` (SDK setup) and `src/App.tsx` (all UI and chat logic). Here's what each piece of the SDK is doing.
 
 ### 1. SDK Initialization
 
-Before you can load a model or generate text, three things have to happen: the SDK runtime boots, the inference backend registers itself, and you tell the SDK which models exist. We do all of this once, memoized behind a promise so React's StrictMode can't trigger it twice.
+Before you can load a model or generate text, three things must happen: the SDK runtime boots, the inference backend registers itself, and you tell the SDK which models exist. We do all of this **once**, memoized behind a promise so React's StrictMode can't trigger it twice.
 
 ```typescript
 // src/lib/runanywhere.ts
@@ -75,17 +129,17 @@ export async function initSDK(): Promise<void> {
 }
 ```
 
-What each call does:
-
-- **`RunAnywhere.initialize(...)`** — spins up the SDK's internal state. `SDK_ENVIRONMENT_DEVELOPMENT` turns on verbose console logging, which is exactly what you want while building.
-- **`LlamaCPP.register({ acceleration: 'auto' })`** — loads the llama.cpp WebAssembly backend. This is the engine. `'auto'` probes the browser for WebGPU and picks it when available, falling back to CPU otherwise. The WASM binary loads automatically here — you don't manage it yourself.
-- **`RunAnywhere.registerModel(url, name, framework, options)`** — adds one entry to the model registry: "this ID maps to this GGUF file at this URL, run it with llama.cpp." Nothing downloads yet — this is just the manifest.
+| Call | What it does |
+| --- | --- |
+| **`RunAnywhere.initialize(...)`** | Spins up the SDK's internal state. `SDK_ENVIRONMENT_DEVELOPMENT` enables verbose console logging — exactly what you want while building. |
+| **`LlamaCPP.register({ acceleration: 'auto' })`** | Loads the llama.cpp WebAssembly backend (the engine). `'auto'` probes for WebGPU and uses it when available, else CPU. The WASM binary loads automatically here. |
+| **`RunAnywhere.registerModel(...)`** | Adds one entry to the model registry: "this ID maps to this GGUF at this URL, run it with llama.cpp." Nothing downloads yet — this is just the manifest. |
 
 Our registry has one model: [LiquidAI's LFM2-350M](https://huggingface.co/LiquidAI/LFM2-350M-GGUF), a small 4-bit-quantized chat model that's a great fit for the browser.
 
 ### 2. Model Loading & Download Progress
 
-Loading is a two-step verb in the real SDK: `downloadModel` fetches the ~250MB GGUF the **first time** (caching it in the browser's **Origin Private File System**, so every later visit loads instantly with no network), then `loadModel` hands the cached weights to the inference backend.
+Loading is a two-step verb: `downloadModel` fetches the ~250 MB GGUF the **first time** (caching it in the browser's **Origin Private File System**, so every later visit loads instantly with no network), then `loadModel` hands the cached weights to the inference backend.
 
 ```typescript
 // src/App.tsx — download, with progress
@@ -127,7 +181,7 @@ const mode = LlamaCPP.isRegistered ? LlamaCPP.accelerationMode : 'cpu'
 // mode is 'webgpu' or 'cpu'
 ```
 
-…and show `Ready — running on WebGPU`.
+…and show **`Ready — running on WebGPU`**.
 
 ### 3. Text Generation
 
@@ -147,11 +201,11 @@ const result = await RunAnywhere.generate({
 
 **The options** we use:
 
-| Option         | Value                     | What it does                                            |
-| -------------- | ------------------------- | ------------------------------------------------------- |
-| `maxTokens`    | `256`                     | Caps response length so replies stay snappy.            |
-| `temperature`  | `0.7`                     | Balances coherence vs. creativity (0 = deterministic).  |
-| `systemPrompt` | `"...Be concise..."`      | Steers the model's persona and style.                   |
+| Option | Value | What it does |
+| --- | --- | --- |
+| `maxTokens` | `256` | Caps response length so replies stay snappy. |
+| `temperature` | `0.7` | Balances coherence vs. creativity (0 = deterministic). |
+| `systemPrompt` | `"...Be concise..."` | Steers the model's persona and style. |
 
 Other available options include `topP`, `topK`, `stopSequences`, and `streamingEnabled` — we keep to the essentials here.
 
@@ -202,7 +256,7 @@ try {
 }
 ```
 
-### 4. What's Happening Under the Hood
+### 4. Under the Hood
 
 Here's the full flow of a single message. Notice where the network is — and where it isn't.
 
@@ -243,17 +297,17 @@ Here's the full flow of a single message. Notice where the network is — and wh
    turn off your Wi-Fi and it still answers.
 ```
 
-The prompt never touches a server. The model weights sit in your browser's Origin Private File System (OPFS). Inference happens in a WASM module running on your GPU (or CPU). The generated text goes straight back to the React state. That's the whole loop.
+The prompt never touches a server. The model weights sit in your browser's Origin Private File System (OPFS). Inference happens in a WASM module running on your GPU (or CPU). The generated text goes straight back to React state. That's the whole loop.
 
 ---
 
-## Project Structure
+## 🗂 Project Structure
 
 ```
 local-ai-chat/
 ├── index.html              # HTML shell; sets <html class="dark"> and page meta
 ├── package.json            # Deps: react, @runanywhere/web, @runanywhere/web-llamacpp
-├── vite.config.ts          # React plugin + COOP/COEP headers for WASM threads
+├── vite.config.ts          # React plugin + WASM/CJS interop + COOP/COEP headers
 ├── tailwind.config.js      # Tailwind config, dark mode via class
 ├── postcss.config.js       # Tailwind + Autoprefixer
 ├── tsconfig.json           # Strict TypeScript, react-jsx
@@ -268,49 +322,58 @@ local-ai-chat/
 
 ---
 
-## Tech Stack
+## 🧰 Tech Stack
 
-- **[React 18](https://react.dev/)** — UI, all in a single `App.tsx`.
-- **[Vite](https://vitejs.dev/)** — dev server and build tool. Fast, zero-fuss.
-- **[TypeScript](https://www.typescriptlang.org/)** — strict mode, fully typed.
-- **[Tailwind CSS](https://tailwindcss.com/)** — dark, minimal styling.
-- **[RunAnywhere Web SDK](https://docs.runanywhere.ai)** — on-device model management and inference.
-- **[LFM2-350M](https://huggingface.co/LiquidAI/LFM2-350M-GGUF)** — a small, fast, 4-bit-quantized chat model from LiquidAI.
+| | Tool | Role |
+| --- | --- | --- |
+| ⚛️ | **[React 18](https://react.dev/)** | UI, all in a single `App.tsx`. |
+| ⚡ | **[Vite](https://vitejs.dev/)** | Dev server and build tool. Fast, zero-fuss. |
+| 🔷 | **[TypeScript](https://www.typescriptlang.org/)** | Strict mode, fully typed. |
+| 🎨 | **[Tailwind CSS](https://tailwindcss.com/)** | Dark, minimal styling. |
+| 🧠 | **[RunAnywhere Web SDK](https://docs.runanywhere.ai)** | On-device model management and inference. |
+| 🤖 | **[LFM2-350M](https://huggingface.co/LiquidAI/LFM2-350M-GGUF)** | Small, fast, 4-bit-quantized chat model from LiquidAI. |
 
 ---
 
-## Deploying
+## ☁️ Deploying
 
-### Vercel (recommended — zero config)
+### Vercel &nbsp;<sub>(recommended — zero config)</sub>
 
 ```bash
 npm i -g vercel   # if you don't have the CLI
 vercel --prod
 ```
 
-Vercel auto-detects Vite from `vercel.json` and builds with `npm run build`. The `vercel.json` in this repo also sets the **`Cross-Origin-Opener-Policy`** and **`Cross-Origin-Embedder-Policy`** headers in production — these are required for the WASM backend's multi-threaded (`SharedArrayBuffer`) inference, so don't remove them.
+Vercel auto-detects Vite from `vercel.json` and builds with `npm run build`. The `vercel.json` in this repo also sets the **`Cross-Origin-Opener-Policy`** and **`Cross-Origin-Embedder-Policy`** headers in production — these are required for the WASM backend's multi-threaded (`SharedArrayBuffer`) inference, so **don't remove them.**
 
 ### GitHub Pages
 
-Vite is already configured with `base: './'`, so the built app works from a subpath.
+Vite is configured with `base: './'`, so the built app works from a subpath.
 
 ```bash
 npm run build          # outputs to dist/
 npx gh-pages -d dist   # publishes dist/ to the gh-pages branch
 ```
 
-> **Heads-up on GitHub Pages:** Pages can't set custom response headers, so it may not serve the COOP/COEP headers the WASM threads want. If inference misbehaves there, prefer Vercel (which sets them via `vercel.json`).
+> [!WARNING]
+> GitHub Pages can't set custom response headers, so it may not serve the COOP/COEP headers the WASM threads want. If inference misbehaves there, prefer Vercel (which sets them via `vercel.json`).
 
 ---
 
-## About RunAnywhere
+## 🌐 About RunAnywhere
 
 [RunAnywhere](https://docs.runanywhere.ai) (YC W26) builds on-device AI infrastructure — SDKs that run large language models locally on the web, iOS, and Android instead of in the cloud. Their Web SDK compiles llama.cpp to WebAssembly so a model can run entirely in a browser tab, with WebGPU acceleration and no server round-trips. Read the docs at **[docs.runanywhere.ai](https://docs.runanywhere.ai)**.
 
-> The Web SDK is under active development. This app was built and verified against **`@runanywhere/web@0.20.10`** and **`@runanywhere/web-llamacpp@0.20.10`**. The public surface is the `RunAnywhere` facade (`RunAnywhere.initialize`, `registerModel`, `downloadModel`, `loadModel`, `generate`, `cancelGeneration`) plus `LlamaCPP.register()`. If a newer version changes the API, check the [official starter app](https://github.com/RunanywhereAI/runanywhere-sdks/tree/main/examples/web/RunAnywhereAI) and update accordingly.
+> [!NOTE]
+> The Web SDK is under active development. This app was built and verified against **`@runanywhere/web@0.20.10`** and **`@runanywhere/web-llamacpp@0.20.10`**. The public surface is the `RunAnywhere` facade (`initialize`, `registerModel`, `downloadModel`, `loadModel`, `generate`, `cancelGeneration`) plus `LlamaCPP.register()`. If a newer version changes the API, check the [official starter app](https://github.com/RunanywhereAI/runanywhere-sdks/tree/main/examples/web/RunAnywhereAI) and update accordingly.
 
 ---
 
-## License
+## 📄 License
 
-MIT
+Released under the **[MIT License](https://opensource.org/licenses/MIT)**.
+
+<div align="center">
+<br />
+<sub>Built to show that real AI can run with <b>zero servers</b> — right inside the browser. 🧠✨</sub>
+</div>
