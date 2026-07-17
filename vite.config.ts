@@ -1,6 +1,38 @@
+import { copyFileSync, mkdirSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+
+const rootDir = dirname(fileURLToPath(import.meta.url))
+
+// The RunAnywhere WASM glue files (racommons*.js) load their `.wasm` binary at
+// runtime by BARE, un-hashed filename relative to their own URL — e.g. the glue
+// bundled to `dist/assets/racommons-<hash>.js` fetches `/assets/racommons.wasm`.
+// Rollup bundles the glue JS but never emits those `.wasm` files, so production
+// 404s ("both async and sync fetching of the wasm failed"). This plugin copies
+// each `.wasm` into `dist/assets/` under its original name so the glue finds it.
+const RUNANYWHERE_WASM = [
+  'node_modules/@runanywhere/web/wasm/racommons.wasm',
+  'node_modules/@runanywhere/web-llamacpp/wasm/racommons-llamacpp.wasm',
+  'node_modules/@runanywhere/web-llamacpp/wasm/racommons-llamacpp-webgpu.wasm',
+]
+
+function copyRunAnywhereWasm(): Plugin {
+  return {
+    name: 'copy-runanywhere-wasm',
+    apply: 'build',
+    writeBundle(options) {
+      const assetsDir = resolve(options.dir ?? resolve(rootDir, 'dist'), 'assets')
+      mkdirSync(assetsDir, { recursive: true })
+      for (const rel of RUNANYWHERE_WASM) {
+        const src = resolve(rootDir, rel)
+        const name = rel.slice(rel.lastIndexOf('/') + 1)
+        copyFileSync(src, resolve(assetsDir, name))
+      }
+    },
+  }
+}
 
 // The RunAnywhere packages ship ESM but depend on the CommonJS
 // `@runanywhere/proto-ts`. Each parent has its own nested copy. We resolve
@@ -15,7 +47,7 @@ const protoTsDir = fileURLToPath(
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), copyRunAnywhereWasm()],
   resolve: {
     // Both RunAnywhere parents ship their own nested copy of the CommonJS
     // `@runanywhere/proto-ts`. Alias every bare import to a single copy so we
