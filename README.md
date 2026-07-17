@@ -18,7 +18,7 @@ Type a message, and every single token is generated **on your machine**.
 
 <br />
 
-**[🚀 Live Demo](https://your-project.vercel.app)** &nbsp;·&nbsp; **[⚡ Quick Start](#-quick-start)** &nbsp;·&nbsp; **[🔬 How It Works](#-how-it-works)** &nbsp;·&nbsp; **[☁️ Deploy](#-deploying)**
+**[🚀 Live Demo](https://local-ai-rose.vercel.app)** &nbsp;·&nbsp; **[⚡ Quick Start](#-quick-start)** &nbsp;·&nbsp; **[🔬 How It Works](#-how-it-works)** &nbsp;·&nbsp; **[☁️ Deploy](#-deploying)**
 
 </div>
 
