@@ -10,8 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@runanywhere/web": "^0.1.0",
-    "@runanywhere/web-llamacpp": "^0.1.0",
+    "@runanywhere/web": "^0.20.10",
+    "@runanywhere/web-llamacpp": "^0.20.10",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

@@ -48,51 +48,66 @@ Before you can load a model or generate text, three things have to happen: the S
 
 ```typescript
 // src/lib/runanywhere.ts
-import { RunAnywhere, SDKEnvironment, LLMFramework, ModelCategory } from '@runanywhere/web'
+import { RunAnywhere, SDKEnvironment, ModelCategory, InferenceFramework } from '@runanywhere/web'
 import { LlamaCPP } from '@runanywhere/web-llamacpp'
 
 export async function initSDK(): Promise<void> {
   // 1. Boot the SDK runtime.
   await RunAnywhere.initialize({
-    environment: SDKEnvironment.Development,
-    debug: true,
+    environment: SDKEnvironment.SDK_ENVIRONMENT_DEVELOPMENT,
   })
 
   // 2. Register the llama.cpp WASM backend. This is what actually runs the
-  //    model, and it auto-picks WebGPU when available, CPU otherwise.
-  await LlamaCPP.register()
+  //    model, and 'auto' picks WebGPU when available, CPU otherwise.
+  await LlamaCPP.register({ acceleration: 'auto' })
 
-  // 3. Tell the SDK which models exist and where to fetch them from.
-  RunAnywhere.registerModels(MODELS)
+  // 3. Tell the SDK about our model and where to fetch it from.
+  RunAnywhere.registerModel(
+    'https://huggingface.co/LiquidAI/LFM2-350M-GGUF/resolve/main/LFM2-350M-Q4_K_M.gguf',
+    'LFM2 350M Q4_K_M',
+    InferenceFramework.INFERENCE_FRAMEWORK_LLAMA_CPP,
+    {
+      id: 'lfm2-350m-q4_k_m',
+      modality: ModelCategory.MODEL_CATEGORY_LANGUAGE,
+      memoryRequirement: 250_000_000,
+    },
+  )
 }
 ```
 
 What each call does:
 
-- **`RunAnywhere.initialize(...)`** — spins up the SDK's internal state. `SDKEnvironment.Development` and `debug: true` give you verbose console logging, which is exactly what you want while building.
-- **`LlamaCPP.register()`** — loads the llama.cpp WebAssembly backend. This is the engine. Registering it also probes the browser for WebGPU support and configures acceleration accordingly. The WASM binary loads automatically here — you don't manage it yourself.
-- **`RunAnywhere.registerModels(MODELS)`** — hands the SDK a catalog of `CompactModelDef` entries. Each entry says "this model ID maps to this GGUF file in this Hugging Face repo, run it with this framework." Nothing downloads yet — this is just the manifest.
+- **`RunAnywhere.initialize(...)`** — spins up the SDK's internal state. `SDK_ENVIRONMENT_DEVELOPMENT` turns on verbose console logging, which is exactly what you want while building.
+- **`LlamaCPP.register({ acceleration: 'auto' })`** — loads the llama.cpp WebAssembly backend. This is the engine. `'auto'` probes the browser for WebGPU and picks it when available, falling back to CPU otherwise. The WASM binary loads automatically here — you don't manage it yourself.
+- **`RunAnywhere.registerModel(url, name, framework, options)`** — adds one entry to the model registry: "this ID maps to this GGUF file at this URL, run it with llama.cpp." Nothing downloads yet — this is just the manifest.
 
-Our catalog has one model: [LiquidAI's LFM2-350M](https://huggingface.co/LiquidAI/LFM2-350M-GGUF), a small 4-bit-quantized chat model that's a great fit for the browser.
+Our registry has one model: [LiquidAI's LFM2-350M](https://huggingface.co/LiquidAI/LFM2-350M-GGUF), a small 4-bit-quantized chat model that's a great fit for the browser.
 
 ### 2. Model Loading & Download Progress
 
-The model file (~250MB) downloads the **first time** you call `loadModel`. The SDK caches it in the browser's **IndexedDB**, so the second visit — and every visit after — loads it instantly from disk with no network.
+Loading is a two-step verb in the real SDK: `downloadModel` fetches the ~250MB GGUF the **first time** (caching it in the browser's **Origin Private File System**, so every later visit loads instantly with no network), then `loadModel` hands the cached weights to the inference backend.
 
 ```typescript
-// src/App.tsx
-await ModelManager.loadModel(MODEL_ID, {
-  onProgress: (progress: {
-    downloadedBytes: number
-    totalBytes: number
-    percentage: number
-  }) => {
-    setDownloadProgress(progress.percentage)
+// src/App.tsx — download, with progress
+await RunAnywhere.downloadModel({
+  modelId: MODEL_ID,
+  onProgress: (progress) => {
+    const pct = progress.totalBytes > 0
+      ? (progress.bytesDownloaded / progress.totalBytes) * 100
+      : progress.stageProgress * 100
+    setDownloadProgress(pct)
   },
+})
+
+// ...then load the cached weights into the backend
+await RunAnywhere.loadModel({
+  modelId: MODEL_ID,
+  forceReload: false,
+  validateAvailability: true,
 })
 ```
 
-The `onProgress` callback fires repeatedly as bytes arrive. We pipe `progress.percentage` straight into React state to drive the progress bar:
+The `onProgress` callback fires repeatedly as bytes arrive. `DownloadProgress` reports raw `bytesDownloaded` / `totalBytes`, so we compute the percentage ourselves and pipe it into React state to drive the progress bar:
 
 ```tsx
 {loadingModel && (
@@ -120,9 +135,10 @@ Generation is a single async call. No streaming, no websockets — you `await` t
 
 ```typescript
 // src/App.tsx
-import { TextGeneration } from '@runanywhere/web'
+import { RunAnywhere } from './lib/runanywhere'
 
-const result = await TextGeneration.generate(prompt, {
+const result = await RunAnywhere.generate({
+  prompt,
   maxTokens: 256,
   temperature: 0.7,
   systemPrompt: 'You are a helpful assistant. Be concise and clear.',
@@ -142,38 +158,41 @@ Other available options include `topP`, `topK`, `stopSequences`, and `streamingE
 **The result** carries everything you need to show the user what just happened:
 
 ```typescript
-result.text               // the generated reply
-result.latencyMs          // total round-trip time in ms
-result.tokensPerSecond    // generation speed (higher = faster hardware)
-result.timeToFirstTokenMs // how long until the first token appeared
-result.responseTokens     // tokens generated
-result.hardwareUsed       // 'webgpu' or 'cpu'
-result.modelUsed          // the model ID that answered
+result.text             // the generated reply
+result.generationTimeMs // total wall-clock generation time in ms
+result.tokensPerSecond  // generation speed (higher = faster hardware)
+result.ttftMs           // time to first token (streaming mode)
+result.inputTokens      // prompt tokens
+result.responseTokens   // generated tokens
+result.framework        // which backend answered (e.g. 'llama.cpp')
+result.modelUsed        // the model ID that answered
+result.finishReason     // 'stop' | 'length' | 'cancelled' | 'error'
 ```
 
-We render the three most meaningful ones under each AI message:
+We render the three most meaningful ones under each AI message. For the hardware label we use the backend's `accelerationMode` (`webgpu`/`cpu`) captured at load time:
 
 ```tsx
 <div className="text-xs text-gray-500">
-  {result.latencyMs.toFixed(0)}ms · {result.tokensPerSecond.toFixed(1)} tok/s · {hardware}
+  {result.generationTimeMs.toFixed(0)}ms · {result.tokensPerSecond.toFixed(1)} tok/s · {hardware}
 </div>
 // → "412ms · 38.6 tok/s · WebGPU"
 ```
 
-**Stopping mid-generation.** While a response is streaming out of the model, the Send button becomes a Stop button:
+**Stopping mid-generation.** While the model is producing tokens, the Send button becomes a Stop button:
 
 ```typescript
-TextGeneration.cancel()
-// The pending generate() promise rejects with an SDKError
-// whose code is GenerationCancelled.
+RunAnywhere.cancelGeneration()
+// The in-flight generate() either rejects, or resolves with a partial
+// result whose finishReason is "cancelled".
 ```
 
-We catch that specific rejection and treat it as a no-op — the user chose to stop, so there's no error to show:
+We detect cancellation structurally (on both the rejection and the `finishReason`) and treat it as a no-op — the user chose to stop, so there's no error to show:
 
 ```typescript
 try {
-  const result = await TextGeneration.generate(prompt, options)
-  // ...append the assistant message
+  const result = await RunAnywhere.generate({ prompt, ...options })
+  if (isCancellation(result)) return  // partial, cancelled result
+  // ...otherwise append the assistant message
 } catch (err) {
   if (isCancellation(err)) {
     // user pressed Stop — nothing to surface
@@ -195,7 +214,7 @@ Here's the full flow of a single message. Notice where the network is — and wh
    ───────────────────► │   │   App.tsx    │                      │
                         │   │  (React UI)  │                      │
                         │   └──────┬───────┘                      │
-                        │          │ TextGeneration.generate()    │
+                        │          │ RunAnywhere.generate()       │
                         │          ▼                              │
                         │   ┌──────────────────┐                 │
                         │   │  RunAnywhere SDK  │                 │
@@ -205,7 +224,7 @@ Here's the full flow of a single message. Notice where the network is — and wh
                         │   ┌────────────────────────┐           │
                         │   │  llama.cpp  (WASM)      │           │
                         │   │  + LFM2-350M weights    │           │
-                        │   │  (loaded from IndexedDB)│           │
+                        │   │   (loaded from OPFS)    │           │
                         │   └───────────┬────────────┘           │
                         │               │ runs on...              │
                         │        ┌──────┴───────┐                 │
@@ -224,7 +243,7 @@ Here's the full flow of a single message. Notice where the network is — and wh
    turn off your Wi-Fi and it still answers.
 ```
 
-The prompt never touches a server. The model weights sit in your browser's IndexedDB. Inference happens in a WASM module running on your GPU (or CPU). The generated text goes straight back to the React state. That's the whole loop.
+The prompt never touches a server. The model weights sit in your browser's Origin Private File System (OPFS). Inference happens in a WASM module running on your GPU (or CPU). The generated text goes straight back to the React state. That's the whole loop.
 
 ---
 
@@ -244,7 +263,7 @@ local-ai-chat/
     ├── index.css           # Tailwind directives + dark scrollbar styles
     ├── App.tsx             # ALL UI + chat logic (state, generation, metrics)
     └── lib/
-        └── runanywhere.ts  # SDK init: initialize → register backend → register models
+        └── runanywhere.ts  # SDK init: initialize → register backend → register model
 ```
 
 ---
@@ -288,7 +307,7 @@ npx gh-pages -d dist   # publishes dist/ to the gh-pages branch
 
 [RunAnywhere](https://docs.runanywhere.ai) (YC W26) builds on-device AI infrastructure — SDKs that run large language models locally on the web, iOS, and Android instead of in the cloud. Their Web SDK compiles llama.cpp to WebAssembly so a model can run entirely in a browser tab, with WebGPU acceleration and no server round-trips. Read the docs at **[docs.runanywhere.ai](https://docs.runanywhere.ai)**.
 
-> The Web SDK is in early beta (`v0.1.x`). If `npm install` can't resolve the RunAnywhere packages, check the [official starter app](https://github.com/RunanywhereAI/runanywhere-sdks/tree/main/examples/web/RunAnywhereAI) for the currently published version numbers and update `package.json` accordingly.
+> The Web SDK is under active development. This app was built and verified against **`@runanywhere/web@0.20.10`** and **`@runanywhere/web-llamacpp@0.20.10`**. The public surface is the `RunAnywhere` facade (`RunAnywhere.initialize`, `registerModel`, `downloadModel`, `loadModel`, `generate`, `cancelGeneration`) plus `LlamaCPP.register()`. If a newer version changes the API, check the [official starter app](https://github.com/RunanywhereAI/runanywhere-sdks/tree/main/examples/web/RunAnywhereAI) and update accordingly.
 
 ---
 

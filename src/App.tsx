@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { TextGeneration } from '@runanywhere/web'
-import { initSDK, ModelManager, LlamaCPP, MODEL_ID } from './lib/runanywhere'
+import { initSDK, RunAnywhere, LlamaCPP, MODEL_ID } from './lib/runanywhere'
 
 // ---- Types -----------------------------------------------------------------
 
@@ -16,15 +15,14 @@ interface Message {
   metrics?: Metrics
 }
 
-// The SDK rejects a cancelled generation with an error whose code is
-// 'GenerationCancelled'. We detect it structurally so we don't show a scary
-// error message when the user simply pressed "Stop".
-function isCancellation(err: unknown): boolean {
-  if (typeof err !== 'object' || err === null) return false
-  const anyErr = err as Record<string, unknown>
-  const code = String(anyErr.code ?? '')
-  const message = String(anyErr.message ?? '')
-  return /cancel/i.test(code) || /cancel/i.test(message)
+// A cancelled generation surfaces as either a rejected promise or a resolved
+// result whose finishReason is "cancelled". We detect both structurally so we
+// never show a scary error when the user simply pressed "Stop".
+function isCancellation(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  const haystack = `${v.code ?? ''} ${v.message ?? ''} ${v.finishReason ?? ''}`
+  return /cancel/i.test(haystack)
 }
 
 // ---- Component --------------------------------------------------------------
@@ -82,15 +80,25 @@ export default function App() {
     setLoadingModel(true)
     setDownloadProgress(0)
     try {
-      await ModelManager.loadModel(MODEL_ID, {
-        onProgress: (progress: {
-          downloadedBytes: number
-          totalBytes: number
-          percentage: number
-        }) => {
-          setDownloadProgress(progress.percentage)
+      // Download the model file (~250MB) — cached in OPFS after the first run.
+      await RunAnywhere.downloadModel({
+        modelId: MODEL_ID,
+        onProgress: (progress) => {
+          const pct =
+            progress.totalBytes > 0
+              ? (progress.bytesDownloaded / progress.totalBytes) * 100
+              : progress.stageProgress * 100
+          setDownloadProgress(Math.min(100, Math.max(0, pct)))
         },
       })
+
+      // Load the downloaded weights into the inference backend.
+      await RunAnywhere.loadModel({
+        modelId: MODEL_ID,
+        forceReload: false,
+        validateAvailability: true,
+      })
+
       // Report which backend the WASM runtime chose.
       const mode = LlamaCPP.isRegistered
         ? LlamaCPP.accelerationMode
@@ -99,6 +107,7 @@ export default function App() {
           : 'cpu'
       setHardware(mode)
       setModelLoaded(true)
+      setDownloadProgress(100)
     } catch (err) {
       console.error('Model load failed:', err)
       setError('Failed to download model. Check connection.')
@@ -117,11 +126,19 @@ export default function App() {
     setGenerating(true)
 
     try {
-      const result = await TextGeneration.generate(prompt, {
+      const result = await RunAnywhere.generate({
+        prompt,
         maxTokens: 256,
         temperature: 0.7,
         systemPrompt: 'You are a helpful assistant. Be concise and clear.',
       })
+
+      // The user may have pressed Stop; the backend can return a partial
+      // result flagged with finishReason "cancelled".
+      if (isCancellation(result)) {
+        console.info('Generation cancelled by user.')
+        return
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -129,15 +146,14 @@ export default function App() {
           role: 'assistant',
           text: result.text,
           metrics: {
-            latencyMs: result.latencyMs,
+            latencyMs: result.generationTimeMs,
             tokensPerSecond: result.tokensPerSecond,
-            hardwareUsed: result.hardwareUsed,
+            hardwareUsed: hardware ?? result.framework ?? 'cpu',
           },
         },
       ])
     } catch (err) {
       if (isCancellation(err)) {
-        // User pressed Stop — not an error worth surfacing.
         console.info('Generation cancelled by user.')
       } else {
         console.error('Generation failed:', err)
@@ -149,7 +165,7 @@ export default function App() {
   }
 
   function handleStop() {
-    TextGeneration.cancel()
+    RunAnywhere.cancelGeneration()
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -233,10 +249,7 @@ export default function App() {
         </section>
 
         {/* Message list */}
-        <div
-          ref={scrollRef}
-          className="flex-1 space-y-3 overflow-y-auto py-2"
-        >
+        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto py-2">
           {messages.length === 0 && (
             <div className="flex h-full items-center justify-center text-center text-sm text-gray-500">
               {modelLoaded
